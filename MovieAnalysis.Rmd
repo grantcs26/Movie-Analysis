@@ -1,0 +1,377 @@
+---
+title: "Analysis Report 2"
+author: "Grant Spivey"
+output: pdf_document
+date: "`r Sys.Date()`"
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+movies <- read.csv("imdbdataset")
+```
+
+# Data Description
+
+The data I am using for this report is titled "IMDB Top 250 Movies Dataset" and comes from kaggle.com. The dataset contains data about the top 250 highest rated movies from the Internet Movie Database (IMDB) in 2021. The dataset contains information on the movies including their name, ranking, release year, rating, genre, budget, box office, run-time, certificate (parental guidance rating) and more.
+
+# Research Question
+
+The research question guiding the report is: "What are the best predictors for IMDB ratings among the 250 movies?"
+I think it will be interesting to sift through the data and see if there are patterns that differentiate the movies that are deemed the best of the best and whether certain qualities of the movie may predict that movie's critical success.
+
+# Variables of Interest
+
+The variables I will explore to build my predictive model are:
+
+Dependent (what I am predicting)
+1. rating - this variable is numerical and is the IMDB rating of the movie and the dependent variable which I am trying to predict.
+
+Independent (factors used to make a prediction)
+2. year - this variable is numerical and is the year of release of the movie
+
+3. run_time - this variable is supposed to be numerical for purposes of my model but is stored as a string in "h m" format; the variable contains the run time of the movie
+
+4. budget - this variable is supposed to be numerical but is stored as a string and is the budget of the movie
+
+5. box_office - this variable is supposed to be numerical but is stored as a string and is the box office of the movie (gross income)
+
+# Data Wrangling
+
+The main data wrangling that needs to be done is to change the string variables into numeric integers so I can make my model without error. I also want to remove movies that have some missing data.
+
+```{r}
+#Converting run_time to numerical minutes
+require(tidyverse)
+library(stringr)
+
+movies$run_time <- sapply(movies$run_time, function(x) {
+  hours <- as.numeric(str_extract(x, "\\d+(?=h)")) 
+  minutes <- as.numeric(str_extract(x, "\\d+(?=m)"))  
+  
+  if (is.na(hours)) hours <- 0
+  if (is.na(minutes)) minutes <- 0
+  
+  return(hours * 60 + minutes)
+})
+
+head(movies$run_time)
+
+#Now to tackle budget and convert it to just a numerical variable
+
+movies$budget <- as.numeric(gsub("[^0-9]", "", movies$budget))
+
+movies$budget[is.na(movies$budget)] <- NA 
+
+head(movies$budget)
+
+#Lastly, the box office transformed into a numerical variable
+
+movies$box_office <- gsub("[^0-9]", "", movies$box_office) 
+
+movies$box_office <- as.numeric(movies$box_office) 
+
+movies$box_office[is.na(movies$box_office)] <- NA
+
+head(movies$box_office)
+
+#Now to clean the dataset by removing movies that are missing some values
+
+movies_clean <- movies %>%
+  filter(!is.na(box_office) & !is.na(budget))
+```
+
+# Exploratory Data Analysis
+
+There are lots of visualizations to look at to understand trends within the data.
+
+# Ratings
+
+```{r}
+ggplot(movies_clean, aes(x = rating)) + 
+  geom_histogram(bins = 30, fill = "purple", color = "black", alpha = 0.7) + 
+  labs(title = "Distribution of IMDB Ratings", x = "IMDB Rating", y = "Frequency") + 
+  theme_minimal()
+```
+
+It seems that the ratings are right skewed; most of the movies on the list of the 250 best rated movies have ratings between 8 and 8.5.
+
+# Run Time
+
+```{r}
+ggplot(movies_clean, aes(x = run_time)) + 
+  geom_histogram(bins = 30, fill = "green", color = "black", alpha = 0.7) + 
+  labs(title = "Distribution of Run Time", x = "Run Time (minutes)", y = "Frequency") + 
+  theme_minimal()
+```
+
+We see that the run time is actually quite normally distributed, with the majority of movies falling between 100 and 150 minutes in run time.
+
+# Year
+
+```{r}
+ggplot(movies_clean, aes(x = year)) + 
+  geom_histogram(binwidth = 1, fill = "blue", color = "black", alpha = 0.7) + 
+  labs(title = "Distribution of Movie Years", x = "Year", y = "Frequency") + 
+  theme_minimal()
+```
+
+Based on this visualization, we see that more of the top rated movies came out more recently, between the years of the late 90s to the mid 2010s.
+
+# Budget
+
+```{r}
+library(ggplot2)
+
+ggplot(movies_clean, aes(x = budget)) + 
+  geom_histogram(bins = 30, fill = "blue", color = "black", alpha = 0.7) + 
+  scale_x_continuous(labels = scales::label_number(scale = 1e-7)) +  
+  labs(title = "Distribution of Movie Budget", x = "Budget (in millions)", y = "Frequency") +
+  theme_minimal()
+```
+
+After observing the budget we see that there is a heavy amount of skew, likely due to the widely varying budgets between movies. As such, we will apply a log transformation to the variable and try revisualizing.
+
+```{r}
+movies_clean$log_budget <- log(movies_clean$budget)
+
+ggplot(movies_clean, aes(x = log_budget)) + 
+  geom_histogram(bins = 30, fill = "blue", color = "black", alpha = 0.7) + 
+  labs(title = "Log-Transformed Distribution of Movie Budget", 
+       x = "Log(Budget) (log scale)", 
+       y = "Frequency") +
+  theme_minimal()
+```
+
+Now after log transformation we see a normal distribution which will allow us to build a more valid model later.
+
+# Box Office
+
+```{r}
+ggplot(movies_clean, aes(x = box_office)) + 
+  geom_histogram(bins = 30, fill = "skyblue", color = "black", alpha = 0.7) + 
+  labs(title = "Distribution of Box Office", 
+       x = "Box Office", 
+       y = "Frequency") + 
+  theme_minimal()
+```
+
+Like the budget, the box office is (expectedly) very right skewed. I did not put the box office in millions for this reason as I found it to be redundant given how skewed the data is and the fact it will require a log transformation.
+
+```{r}
+movies_clean$log_box_office <- log(movies_clean$box_office)
+
+ggplot(movies_clean, aes(x = log_box_office)) + 
+  geom_histogram(bins = 30, fill = "red", color = "black", alpha = 0.7) + 
+  labs(title = "Distribution of Log-Transformed Box Office", 
+       x = "Log(Box Office) (log scale)", 
+       y = "Frequency") + 
+  theme_minimal()
+```
+
+While the log transformed box office data is still somewhat skewed, the data is a lot more normal for use in my model.
+
+# Correlational Analysis between Rating and each Variable
+
+Now we will see if there are any standout relationships between individual variable and rating.
+
+# Rating vs Year
+
+```{r}
+ggplot(movies_clean, aes(x = year, y = rating)) + 
+  geom_point(alpha = 0.5, color = "orange") + 
+  geom_smooth(method = "lm", color = "blue", se = FALSE) +  
+  labs(title = "IMDB Rating vs Year", x = "Year", y = "IMDB Rating") + 
+  theme_minimal()
+```
+
+Based on this visualization, it seems that year does not much of an influence on rating at all, but I will investigate further in my model.
+
+# Rating vs Run Time
+
+```{r}
+ggplot(movies_clean, aes(x = run_time, y = rating)) + 
+  geom_point(alpha = 0.5, color = "purple") + 
+  geom_smooth(method = "lm", color = "blue", se = FALSE) + 
+  labs(title = "IMDB Rating vs Run Time", x = "Run Time (minutes)", y = "IMDB Rating") + 
+  theme_minimal()
+```
+
+Based on this visualization, we see a slight positive correlation between rating and run time, which could indicate that run time might play a role in predicting rating.
+
+# Rating vs Budget
+
+```{r}
+ggplot(movies_clean, aes(x = log_budget, y = rating)) + 
+  geom_point(alpha = 0.5, color = "green") + 
+  geom_smooth(method = "lm", color = "blue", se = FALSE) +  
+  labs(title = "IMDB Rating vs Budget", x = "Log Adjusted Budget", y = "IMDB Rating") + 
+  theme_minimal()
+```
+
+Now comparing rating with log adjusted budget, we see a slight positive correlation. This indicates that higher budget could predict higher rating, but we will investigate this further.
+
+# Rating vs Box Office
+
+```{r}
+ggplot(movies_clean, aes(x = log_box_office, y = rating)) + 
+  geom_point(alpha = 0.5, color = "red") + 
+  geom_smooth(method = "lm", color = "blue", se = FALSE) +  
+  labs(title = "IMDB Rating vs Box Office", x = "Log Adjusted Box Office", y = "IMDB Rating") + 
+  theme_minimal()
+```
+
+We once again see a slight positive correlation between rating and the log adjusted box office, which may indicate that higher box office may predict higher rating.
+
+# Model Building
+
+The first rendition of my model contains all the variables (year, run_time, log_box_office, log_budget) to see their effect on rating.
+
+```{r}
+model1 <- lm(rating ~ year + run_time + log_box_office + log_budget, data = movies_clean)
+summary(model1)
+```
+
+Based on this initial model, it appears that most of the variables are not significant predictors other than run_time, but before adjusting the model lets run through some diagnostics and see if there are specific issues with the model.
+
+Residual normality:
+
+```{r}
+qqnorm(resid(model1))
+qqline(resid(model1), col = "red")
+
+shapiro.test(resid(model1))
+```
+
+Since we see in the Shapiro-Wilk test that the p-value is extremely small, the residuals are not normally distributed. Based on the Q-Q plot, we see that there are some notable outliers, especially at the top end; so, we will check for these outliers and see how to proceed.
+
+```{r}
+standardized_resid <- rstandard(model1)
+
+movies_clean[which(abs(standardized_resid) >2), c("name", "rating")]
+
+```
+
+As expected based on the Q-Q plot, it seems the top 8 highest ranked movies are all far outliers. This makes sense as top movies 7 and above all score at a 9 or above which none of the movies below it manage to do. Since these movies are quite important and notable in terms of IMDB rankings, we will NOT remove them, but it should be noted that these films have such exceptional statistics that they pull on the rest of the dataset.
+
+Now, we will check for heteroskedasticity using the Bresuch-Pagan test.
+
+```{r}
+library(lmtest)
+bptest(model1)
+```
+
+Since the p-value is very small, we reject the null of constant variance and assume there is heteroskedasticity in the model. I will adjust the model using robust standard errors and check variable significance again.
+
+```{r}
+library(sandwich)
+coeftest(model1, vcov = vcovHC(model1, type = "HC1"))
+```
+
+Based on the results, we see that not much has changed with only run_time still having a small enough p-value to be significant. Lets check some other diagnostics.
+
+Correct Function Form:
+
+```{r}
+library(car)
+crPlots(model1)
+```
+
+Based on these graphs we actually find that year, run_time, and log_box_office all have some curvature to them; this could mean that we are dealing with non-linear components. To address this, lets create a second model with quadratic terms added to see if any variables change in significance.
+
+```{r}
+model2 <- lm(rating ~ year + run_time + log_box_office + log_budget + I(year^2) + I(run_time^2) + I(log_box_office^2), data = movies_clean)
+
+summary(model2)
+```
+
+This updated model shows an improved adjusted R-squared from 0.0448 to 0.0714. Furthermore, the residual standard error dropped slightly from 0.232 to 0.229. We also see that run_time when accounting for the nonlinearity is actually not significant compared to when run_time was considered linear. We also find that year and log_box_office DO become significant with the quadratics added. Lets try evaluating a third model where we assume that run_time is linear whilst keeping year and log_box_office nonlinear.
+
+```{r}
+model3 <- lm(rating ~ year + run_time + log_box_office + log_budget + 
+               I(year^2) + I(log_box_office^2), data = movies_clean)
+
+summary(model3)
+```
+
+With this third model we see that the standard error has stayed the same at 0.229 but the adjusted R-squared has improved again from 0.0714 to 0.0735. The model is improving, but still only accounts for about 7.4% of variance. After checking multicollinearity, lets see how the model should be adjusted.
+
+Checking Multicollinearity: 
+
+```{r}
+vif(model3)
+```
+
+By analyzing variance inflation factors, we see that there is some extreme multicollinearity in the year and log_box_office variables, which I suspect is due to the quadratic transformations. Lets compare with model1 which does not contain any quadratics.
+
+```{r}
+vif(model1)
+```
+
+We see that the initial model does not contain multicollinearity, but we are unable to capture the nonlinearity of the year and log_box_office variables. As such, despite the slight improvement in standard error and adjusted R-squared, in order to better interpret individual coefficients we will remove the quadratics.
+
+At this point we are almost back to square one, which is somewhat disheartening, but we can now remove variables based on how we perceive them to be significant for rating.
+
+Across all of the model renditions and diagnostics, one thing remained consistent; log_budget does not appear to be a significant predictor. Lets remove it and check the model.
+
+```{r}
+model4 <- lm(rating ~ year + run_time + log_box_office, data = movies_clean)
+summary(model4)
+```
+
+Compared to model1, we see very slight, almost negligible improvements to standard error and adjusted R-squared. Lets make one more adjustment by removing year. Since run_time appears to be the only significant variable at this point, I want to keep it in the model. While both year and log_box_office are considered less significant, I hypothesize that the actual year the film was created in would probably have less predictive power on the current recption of the movie compared to how well the movie performed financially at the box office.
+
+```{r}
+model5 <- lm(rating ~ run_time + log_box_office, data = movies_clean)
+summary(model5)
+```
+
+Now we see that the adjusted R-squared has decreased very slightly, but due to the removed variable's lack of significance it seems that removing the complexity is worthwhile. I will create one more model only including the significant variable run_time, then finally compare the relevant models' AICs (Akaike Information Criterion) to decide on the final model.
+
+```{r}
+model6 <- lm(rating ~ run_time, data = movies_clean)
+summary(model6)
+```
+
+Once again the adjusted R-squared is very slightly decreased, which reaffirms that run_time has been the only significant variable thus far. Before deciding on a final model, I will compare the AICs of the last few models and evaluate.
+
+```{r}
+AIC(model1, model4, model5, model6)
+```
+
+We see that the final model, model6, containing only run_time has the lowest AIC and is therefore the best balance of fit and simplicity. Since we have established that run_time is the most significant variable, our final model will be model 6 which contains only run_time as a predictor for IMDB rating.
+
+# Analytic Interpretations
+
+Our final model is:
+
+```{r}
+summary(model6)
+```
+
+In the final model we have one variable of run_time which is statistically significant with a p-value of 0.001. The model can be interpreted as such: for every 1-minute increase in run time, the predicted rating increases by about 0.00168 points. Over the course of about an hour difference (60 minutes), the model predicts roughly a 0.1 points increase in rating. The standard error is 0.232 and the adjusted R-squared is 0.0452.
+
+# Discussion
+
+Overall, this report ended up more long-winded than anticipated, but I believe it was an interesting journey exploring some variables in the IMDB Top 250 Movies dataset. In the end, I decided that run time was the variable with the most predictive power in answering the question of "What are the best predictors for IMDB ratings among the 250 movies?" In order to keep model simple and significant, I decided to only include this variable in my final model. However, the model only accounts for 4.5% of variation in IMDB ratings amongst the top 250 movies. I heavily deliberated on adding more variables, but for a few key reasons I decided against it.
+
+1. Run time was the only consistently significant variable.
+
+2. Across all of the other three variables year, budget, and box office, I failed to see their predictive power both statistically and anecdotally.
+
+3. Because the dataset is only concerned with the top 250 movies, it was difficult for me to justify complicating the model for very minor gains when the predictive model was already dealing with relatively strict parameters.
+
+Year, budget, and box office I interpret to not be so significant in determining ratings since: 
+
+Modern critics are unlikely to evaluate year of release significantly except to provide context for certain attributes of the film. 
+
+Budget likely does not play a significant role in how critics evaluate a movie's plot, performances, and entertainment or other value.
+
+Box office success is not reliable as a predictor because critical reception can often differ from audience perceptions, and film critics are often known to value plot, production, and actor performances over general audiences who may simply enjoy a movie if it has some relatively shallow entertainment value.
+
+However, run time does seem to be a plausible predictor if only because a longer run time typically allows for a more extensive and in depth plot, as well as more opportunities for acting prowess to shine. I believe film critics would highly value plot and actor performance, so it makes sense that run time is a useful predictor.
+
+An important limitation to highlight is that the dataset only contains the top 250 rated movies, so it is certainly not a holistic dataset with which to draw more general predictions from. The model I created technically only predicts movie ratings within the top 250 rated movies, not across movies as a whole. Perhaps if a larger dataset was established, variables may appear more or less significant. Another limitation is that IMDB ratings are technically not generated by industry established critics, but rather based on votes from registered users of the website. While this group of voters is likely more invested in film critique compared to audiences at large, there are a number of "x-factors" that could account for how IMDB users voted. As such, further research ought to address a larger dataset, and perhaps explore into a tangential question such as what factors contribute to audience ratings or scores from other movie rating sites such as Rotten Tomatoes.
